@@ -15,7 +15,7 @@ defmodule Firmata.Board do
   }
 
   def start_link(port, opts \\ [], name \\ nil) do
-    opts = Keyword.put(opts, :interface, self)
+    opts = Keyword.put(opts, :interface, self())
     GenServer.start_link(__MODULE__, {port, opts}, name: name)
   end
 
@@ -91,7 +91,7 @@ defmodule Firmata.Board do
 
   def handle_info({:nerves_uart, _port, data}, state) do
     {outbox, parser} = Enum.reduce(data, {state.outbox, state.parser}, &Firmata.Protocol.parse(&2, &1))
-    Enum.each(outbox, &send(self, &1))
+    Enum.each(outbox, &send(self(), &1))
     {:noreply, %{state | outbox: [], parser: parser}}
   end
 

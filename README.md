@@ -38,23 +38,27 @@ defmodule FirmataTest.Board do
   require Logger
 
   @i2c_channel 98
+  @i2c_reg    "R"
   @read_bytes 32
+  @read_delay 1000
+  @max_read_count 4
+  @read_mode :plain
 
   defmodule State do
-    defstruct firmata: nil, sensors: []
+    defstruct firmata: nil, sensors: [], readCount: 0, readMode: :plain
   end
 
   def start_link(tty) do
-    GenServer.start_link(__MODULE__, tty, name: __MODULE__)
+    GenServer.start_link(__MODULE__, {tty, @read_mode}, name: __MODULE__)
   end
 
-  def init(tty) do
+  def init({tty, rmode}) do
     Logger.debug "Starting Firmata on port: #{inspect tty}"
     {:ok, firmata} = Firmata.Board.start_link(tty, [], :hardware_interface)
     Logger.info "Firmata Started: #{inspect firmata}"
     #Start the firmata initialization
     Firmata.Board.sysex_write(firmata, @firmware_query, <<>>)
-    {:ok, %State{firmata: firmata}}
+    {:ok, %State{firmata: firmata, readMode: rmode}}
   end
 
   def init_board(state) do
@@ -73,17 +77,29 @@ defmodule FirmataTest.Board do
     state
   end
 
-  def handle_info(:read_i2c, state) do
+  def handle_info(:read_i2c, %State{readCount: @max_read_count}=state) do
+    {:noreply, state}
+  end
+
+  def handle_info(:read_i2c, %State{readCount: readCount, readMode: :plain}=state) do
     #Send write command to i2c device on channel 98, writes "R" which is the read command for Atlas Scientific stamps
-    Firmata.Board.sysex_write(state.firmata, @i2c_request, <<@i2c_channel, @i2c_mode.write, "R">>)
+    Firmata.Board.sysex_write(state.firmata, @i2c_request, <<@i2c_channel, @i2c_mode.write, @i2c_reg>>)
     #most Atlas Scientific stamps take about 1000ms to return a value
     :timer.sleep(1000)
     #Read 32 bytes from i2c channel we wrote to a second ago.
     #We will get the response in handle_info(:firmata, {:i2c_response: value})
     Firmata.Board.sysex_write(state.firmata, @i2c_request, <<@i2c_channel, @i2c_mode.read, @read_bytes>>)
     # Take a reading every second
-    Process.send_after(self(), :read_i2c, 1000)
-    {:noreply, state}
+    Process.send_after(self(), :read_i2c, @read_delay)
+    {:noreply, %{state | readCount: readCount+1}}
+  end
+
+  def handle_info(:read_i2c, %State{readCount: readCount, readMode: :wread}=state) do
+    # do a wread transaction
+    Firmata.Board.sysex_write(state.firmata, @i2c_request, <<@i2c_channel,  @i2c_mode.wread, @i2c_reg, 0, @read_bytes, 0>>)
+
+    Process.send_after(self(), :read_i2c, @read_delay)
+    {:noreply, %{state | readCount: readCount+1}}
   end
 
   def handle_info({:firmata, {:pin_map, pin_map}}, state) do
@@ -112,11 +128,11 @@ defmodule FirmataTest.Board do
     {:noreply, state}
   end
 
-  def handle_info({:firmata, {:i2c_response, <<channel::integer, 0, 0, 0, _rc::integer, value::binary>>} = payload}, state) do
-    Logger.debug "Payload: #{inspect payload}"
-    Logger.debug "Channel: #{channel}"
-    Logger.debug "Raw Value: #{inspect value}"
-    Logger.debug "Parsed Value: #{inspect value |> parse_ascii}"
+  def handle_info({:firmata, {:i2c_response, <<slave, reg, value::binary>>}},
+                              %State{readCount: readCount}=state) do
+    info =  "#{readCount} Got i2c payload from slave #{slave} reg: #{reg}" <>
+            " value: #{inspect value}"
+    Logger.info(info)
     {:noreply, state}
   end
 
@@ -124,8 +140,6 @@ defmodule FirmataTest.Board do
     Logger.error "Unknown Firmata Data: #{inspect info}"
     {:noreply, state}
   end
-
-  defp parse_ascii(data), do: for n <- data, n != <<0>>, into: "", do: n
 
 end
 ```

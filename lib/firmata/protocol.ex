@@ -38,13 +38,13 @@ defmodule Firmata.Protocol do
     {[{:analog_read, pin, lsb ||| (msb <<< 7)} | outbox], {}}
   end
 
-  def parse(protocol_state, byte) do
+  def parse(protocol_state, _byte) do
     # IO.inspect "unknown: #{to_hex(byte)}"
     # We ignore what we do not understand
     protocol_state
   end
 
-  def digital_write(pins, pin, value) do
+  def digital_write(pins, pin, _value) do
     float = pin / 8
     port = float |> Float.floor |> round
     port_value = Enum.reduce(0..8, 0, fn(i, acc) ->

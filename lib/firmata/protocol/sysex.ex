@@ -1,6 +1,8 @@
 defmodule Firmata.Protocol.Sysex do
   use Firmata.Protocol.Mixin
 
+  require Logger
+
   def parse(<<@start_sysex>><><<command>><>sysex) do
     parse(command, sysex)
   end
@@ -18,11 +20,11 @@ defmodule Firmata.Protocol.Sysex do
   end
 
   def parse(@i2c_response, sysex) do
-    {:i2c_response, binary(sysex)}
+    {:i2c_response, binary( unmarshal(sysex))}
   end
 
   def parse(@string_data, sysex) do
-    {:string_data, binary(sysex)}
+    {:string_data, binary(unmarshal(sysex))}
   end
 
   def parse(bad_byte, sysex) do
@@ -87,5 +89,18 @@ defmodule Firmata.Protocol.Sysex do
 
   def binary(sysex) do
     [value: sysex]
+  end
+
+  def unmarshal(x) do
+    Logger.debug("unmarshaling #{inspect x}")
+    unmarshal(x, [])
+  end
+
+  def unmarshal(<<lsb, msb, rest::binary >>, acc) do
+      b = <<(msb<<<7) ||| lsb>>
+      unmarshal(rest, [b|acc])
+  end
+  def unmarshal(<< >>, acc) do
+    Enum.reverse(acc) |> Enum.join
   end
 end
